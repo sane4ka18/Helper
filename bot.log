@@ -1,0 +1,96 @@
+2025-10-04 14:45:17,354 - __main__ - INFO - Starting improved HWHelper bot...
+2025-10-04 14:45:17,355 - aiogram.dispatcher - INFO - Start polling
+2025-10-04 14:45:18,827 - aiogram.dispatcher - INFO - Run polling for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 14:45:34,949 - aiogram.event - INFO - Update id=579062788 is handled. Duration 679 ms by bot id=8415029501
+2025-10-04 14:45:39,345 - aiogram.event - INFO - Update id=579062789 is handled. Duration 187 ms by bot id=8415029501
+2025-10-04 14:45:41,541 - aiogram.event - INFO - Update id=579062790 is handled. Duration 801 ms by bot id=8415029501
+2025-10-04 14:45:51,093 - aiogram.event - INFO - Update id=579062791 is handled. Duration 270 ms by bot id=8415029501
+2025-10-04 14:45:54,727 - aiogram.event - INFO - Update id=579062792 is handled. Duration 172 ms by bot id=8415029501
+2025-10-04 14:46:05,529 - aiogram.dispatcher - INFO - Polling stopped
+2025-10-04 14:46:05,530 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-10-04 14:46:05,530 - aiogram.dispatcher - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8415029501)
+2025-10-04 14:46:05,784 - aiogram.dispatcher - INFO - Polling stopped for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 14:46:05,785 - __main__ - INFO - Bot stopped by user
+2025-10-04 14:46:09,226 - __main__ - INFO - Starting improved HWHelper bot...
+2025-10-04 14:46:09,226 - aiogram.dispatcher - INFO - Start polling
+2025-10-04 14:46:10,448 - aiogram.dispatcher - INFO - Run polling for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 14:46:11,589 - aiogram.event - INFO - Update id=579062793 is handled. Duration 1035 ms by bot id=8415029501
+2025-10-04 14:46:14,964 - aiogram.event - INFO - Update id=579062794 is handled. Duration 171 ms by bot id=8415029501
+2025-10-04 14:46:16,158 - aiogram.event - INFO - Update id=579062795 is handled. Duration 187 ms by bot id=8415029501
+2025-10-04 14:46:16,909 - aiogram.event - INFO - Update id=579062796 is handled. Duration 182 ms by bot id=8415029501
+2025-10-04 14:46:17,986 - aiogram.event - INFO - Update id=579062797 is handled. Duration 432 ms by bot id=8415029501
+2025-10-04 14:46:39,856 - aiogram.dispatcher - INFO - Polling stopped
+2025-10-04 14:46:39,857 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-10-04 14:46:39,857 - aiogram.dispatcher - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8415029501)
+2025-10-04 14:46:40,122 - aiogram.dispatcher - INFO - Polling stopped for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 14:46:40,123 - __main__ - INFO - Bot stopped by user
+2025-10-04 14:58:40,809 - __main__ - INFO - Starting improved HWHelper bot...
+2025-10-04 14:58:40,809 - aiogram.dispatcher - INFO - Start polling
+2025-10-04 14:58:41,457 - aiogram.dispatcher - INFO - Run polling for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 14:58:52,864 - aiogram.event - INFO - Update id=579062812 is handled. Duration 393 ms by bot id=8415029501
+2025-10-04 14:59:05,439 - aiogram.event - INFO - Update id=579062813 is handled. Duration 196 ms by bot id=8415029501
+2025-10-04 14:59:07,486 - aiogram.event - INFO - Update id=579062814 is handled. Duration 430 ms by bot id=8415029501
+2025-10-04 14:59:11,461 - aiogram.event - INFO - Update id=579062815 is handled. Duration 205 ms by bot id=8415029501
+2025-10-04 14:59:12,476 - aiogram.event - INFO - Update id=579062816 is handled. Duration 200 ms by bot id=8415029501
+2025-10-04 14:59:16,338 - aiogram.event - INFO - Update id=579062817 is handled. Duration 480 ms by bot id=8415029501
+2025-10-04 14:59:20,427 - aiogram.event - INFO - Update id=579062818 is handled. Duration 252 ms by bot id=8415029501
+2025-10-04 14:59:27,861 - aiogram.event - INFO - Update id=579062819 is handled. Duration 812 ms by bot id=8415029501
+2025-10-04 14:59:31,290 - __main__ - ERROR - Photo processing error: name 'aiohttp' is not defined
+2025-10-04 14:59:31,450 - aiogram.event - INFO - Update id=579062820 is handled. Duration 372 ms by bot id=8415029501
+2025-10-04 14:59:49,631 - aiogram.event - INFO - Update id=579062821 is handled. Duration 196 ms by bot id=8415029501
+2025-10-04 14:59:54,388 - aiogram.event - INFO - Update id=579062822 is handled. Duration 189 ms by bot id=8415029501
+2025-10-04 15:00:26,456 - aiogram.dispatcher - INFO - Polling stopped
+2025-10-04 15:00:26,457 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-10-04 15:00:26,457 - aiogram.dispatcher - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8415029501)
+2025-10-04 15:00:26,717 - aiogram.dispatcher - INFO - Polling stopped for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 15:00:26,718 - __main__ - INFO - Bot stopped by user
+2025-10-04 15:00:30,303 - __main__ - INFO - Starting improved HWHelper bot...
+2025-10-04 15:00:30,303 - aiogram.dispatcher - INFO - Start polling
+2025-10-04 15:00:32,758 - aiogram.dispatcher - INFO - Run polling for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 15:00:39,750 - aiogram.event - INFO - Update id=579062823 is handled. Duration 387 ms by bot id=8415029501
+2025-10-04 15:00:44,436 - aiogram.event - INFO - Update id=579062824 is handled. Duration 189 ms by bot id=8415029501
+2025-10-04 15:00:47,735 - aiogram.event - INFO - Update id=579062825 is handled. Duration 633 ms by bot id=8415029501
+2025-10-04 15:01:14,369 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ClientOSError: [WinError 1236] Подключение к сети было разорвано локальной системой
+2025-10-04 15:01:14,369 - aiogram.dispatcher - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8415029501)
+2025-10-04 15:01:26,934 - aiogram.dispatcher - INFO - Connection established (tryings = 1, bot id = 8415029501)
+2025-10-04 15:05:53,001 - aiogram.dispatcher - INFO - Polling stopped
+2025-10-04 15:05:53,002 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-10-04 15:05:53,002 - aiogram.dispatcher - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8415029501)
+2025-10-04 15:05:53,258 - aiogram.dispatcher - INFO - Polling stopped for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 15:05:53,259 - __main__ - INFO - Bot stopped by user
+2025-10-04 15:05:56,724 - __main__ - INFO - Starting improved HWHelper bot...
+2025-10-04 15:05:56,724 - aiogram.dispatcher - INFO - Start polling
+2025-10-04 15:05:58,219 - aiogram.dispatcher - INFO - Run polling for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 15:06:03,860 - aiogram.event - INFO - Update id=579062826 is handled. Duration 537 ms by bot id=8415029501
+2025-10-04 15:06:13,717 - aiogram.event - INFO - Update id=579062827 is handled. Duration 357 ms by bot id=8415029501
+2025-10-04 15:06:16,392 - aiogram.event - INFO - Update id=579062828 is handled. Duration 191 ms by bot id=8415029501
+2025-10-04 15:06:26,617 - aiogram.event - INFO - Update id=579062829 is handled. Duration 700 ms by bot id=8415029501
+2025-10-04 15:06:40,451 - aiogram.event - INFO - Update id=579062830 is handled. Duration 184 ms by bot id=8415029501
+2025-10-04 15:07:13,328 - aiogram.event - INFO - Update id=579062831 is handled. Duration 235 ms by bot id=8415029501
+2025-10-04 15:07:19,892 - aiogram.event - INFO - Update id=579062832 is handled. Duration 326 ms by bot id=8415029501
+2025-10-04 15:07:32,960 - aiogram.event - INFO - Update id=579062833 is handled. Duration 642 ms by bot id=8415029501
+2025-10-04 15:10:18,352 - aiogram.dispatcher - INFO - Polling stopped
+2025-10-04 15:10:18,354 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-10-04 15:10:18,354 - aiogram.dispatcher - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8415029501)
+2025-10-04 15:10:18,619 - aiogram.dispatcher - INFO - Polling stopped for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 15:10:18,620 - __main__ - INFO - Bot stopped by user
+2025-10-04 15:10:22,459 - __main__ - INFO - Starting improved HWHelper bot...
+2025-10-04 15:10:22,459 - aiogram.dispatcher - INFO - Start polling
+2025-10-04 15:10:23,120 - aiogram.dispatcher - INFO - Run polling for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 15:10:24,003 - aiogram.event - INFO - Update id=579062834 is handled. Duration 809 ms by bot id=8415029501
+2025-10-04 15:10:41,731 - aiogram.event - INFO - Update id=579062835 is handled. Duration 702 ms by bot id=8415029501
+2025-10-04 15:10:47,202 - __main__ - ERROR - OCR preprocessing error: tesseract is not installed or it's not in your PATH. See README file for more information.
+2025-10-04 15:10:47,331 - aiogram.event - INFO - Update id=579062836 is handled. Duration 848 ms by bot id=8415029501
+2025-10-04 15:11:05,935 - aiogram.event - INFO - Update id=579062837 is handled. Duration 835 ms by bot id=8415029501
+2025-10-04 15:11:10,192 - __main__ - ERROR - Error in handle_any_text: 'Chat' object has no attribute 'do_action'
+2025-10-04 15:11:10,433 - aiogram.event - INFO - Update id=579062838 is handled. Duration 241 ms by bot id=8415029501
+2025-10-04 15:11:15,120 - __main__ - ERROR - Error in handle_any_text: 'Chat' object has no attribute 'do_action'
+2025-10-04 15:11:15,229 - aiogram.event - INFO - Update id=579062839 is handled. Duration 108 ms by bot id=8415029501
+2025-10-04 15:11:17,417 - aiogram.event - INFO - Update id=579062840 is handled. Duration 262 ms by bot id=8415029501
+2025-10-04 15:11:20,509 - __main__ - ERROR - Error processing text: 'Chat' object has no attribute 'do_action'
+2025-10-04 15:11:20,677 - aiogram.event - INFO - Update id=579062841 is handled. Duration 169 ms by bot id=8415029501
+2025-10-04 15:13:30,393 - aiogram.dispatcher - INFO - Polling stopped
+2025-10-04 15:13:30,394 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-10-04 15:13:30,394 - aiogram.dispatcher - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8415029501)
+2025-10-04 15:13:30,650 - aiogram.dispatcher - INFO - Polling stopped for bot @whelpesbot id=8415029501 - 'Homework Helper'
+2025-10-04 15:13:30,651 - __main__ - INFO - Bot stopped by user
