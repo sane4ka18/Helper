@@ -19,10 +19,12 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from openai import OpenAI
 
+# Загрузка .env (оставлено для совместимости, но ключи теперь в коде)
 load_dotenv()
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+# Хардкоденные ключи (не рекомендуется для продакшена)
+TELEGRAM_TOKEN = "8415029501:AAFzA01cMwy4cF5Xvs8jNWoFVXh46p8LI5w"
+OPENROUTER_API_KEY = "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"
 ADMIN_IDS = {1647999523}
 DONATION_ALERTS_LINK = os.getenv("DONATION_ALERTS_LINK", "https://www.donationalerts.com/r/your_username")
 
