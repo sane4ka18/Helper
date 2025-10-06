@@ -15,15 +15,19 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from openai import OpenAI
+from dotenv import load_dotenv
 
-# Хардкод переменных (замени OPENROUTER_API_KEY на свой!)
-TELEGRAM_TOKEN = "8297535584:AAFBkHwcYfoDNk54fvtq1SpDsKckZfLHfuc"  # Твой токен из BotFather
-OPENROUTER_API_KEY = "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"  # Замени на реальный ключ
-ADMIN_IDS = {1647999523}
-DONATION_ALERTS_LINK = "https://www.donationalerts.com/r/your_username"
+# Загружаем переменные из .env
+load_dotenv()
+
+# Получаем переменные окружения
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+ADMIN_IDS = {int(os.getenv("ADMIN_IDS", "1647999523"))}  # По умолчанию 1647999523
+DONATION_ALERTS_LINK = os.getenv("DONATION_ALERTS_LINK", "https://www.donationalerts.com/r/your_username")
 
 if not TELEGRAM_TOKEN or not OPENROUTER_API_KEY:
-    raise ValueError("TELEGRAM_TOKEN or OPENROUTER_API_KEY not set! Check hardcoded values.")
+    raise ValueError("TELEGRAM_TOKEN or OPENROUTER_API_KEY not set! Check .env file.")
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
@@ -589,4 +593,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Shutting down")
-
