@@ -12,47 +12,53 @@ DB_PATH = "bot.db"
 
 
 async def init_db():
-    """Инициализация базы данных и создание таблиц"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                first_seen TEXT,
-                last_seen TEXT,
-                message_count INTEGER DEFAULT 0,
-                photo_count INTEGER DEFAULT 0,
-                document_count INTEGER DEFAULT 0
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_memory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                question TEXT,
-                answer TEXT,
-                timestamp TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_requests (
-                user_id INTEGER PRIMARY KEY,
-                date TEXT,
-                count INTEGER DEFAULT 0
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_state (
-                user_id INTEGER PRIMARY KEY,
-                state TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS premium_users (
-                user_id INTEGER PRIMARY KEY
-            )
-        """)
-        await db.commit()
-        logger.info("Database initialized")
+    """Initialize the database and create tables"""
+    logger.info(f"Attempting to connect to database at {DB_PATH}")
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            logger.info("Successfully connected to database")
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    first_seen TEXT,
+                    last_seen TEXT,
+                    message_count INTEGER DEFAULT 0,
+                    photo_count INTEGER DEFAULT 0,
+                    document_count INTEGER DEFAULT 0
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_memory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    question TEXT,
+                    answer TEXT,
+                    timestamp TEXT
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_requests (
+                    user_id INTEGER PRIMARY KEY,
+                    date TEXT,
+                    count INTEGER DEFAULT 0
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_state (
+                    user_id INTEGER PRIMARY KEY,
+                    state TEXT
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS premium_users (
+                    user_id INTEGER PRIMARY KEY
+                )
+            """)
+            await db.commit()
+            logger.info("Database tables created successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database at {DB_PATH}: {e}")
+        raise
 
 
 async def migrate_from_dicts(user_stats: Dict, user_memory: Dict, user_requests: Dict, user_state: Dict):
