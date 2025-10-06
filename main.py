@@ -33,9 +33,7 @@ DB_PATH = "/app/data/bot.db"
 try:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     os.chmod(os.path.dirname(DB_PATH), stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
-    logger.info(f"Created directory {os.path.dirname(DB_PATH)} with permissions {oct(os.stat(os.path.dirname(DB_PATH)).st_mode)}")
 except Exception as e:
-    logger.error(f"Failed to create or set permissions for {os.path.dirname(DB_PATH)}: {e}")
     raise
 
 # Configure logging to both console and file
@@ -47,7 +45,6 @@ logging.basicConfig(
         logging.FileHandler("/app/data/bot.log", mode='a')
     ]
 )
-logger = logging.getLogger(__name__)
 
 if not TELEGRAM_TOKEN or not OPENROUTER_API_KEY:
     raise ValueError("TELEGRAM_TOKEN or OPENROUTER_API_KEY not found in .env file")
@@ -947,6 +944,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Shutting down")
+
 
 
 
