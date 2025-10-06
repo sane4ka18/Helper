@@ -27,7 +27,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 ADMIN_IDS = {1647999523}
 DONATION_ALERTS_LINK = os.getenv("DONATION_ALERTS_LINK", "https://www.donationalerts.com/r/your_username")
-DB_PATH = "bot.db"
+DB_PATH = "/app/data/bot.db"
 
 if not TELEGRAM_TOKEN or not OPENROUTER_API_KEY:
     raise ValueError("TELEGRAM_TOKEN or OPENROUTER_API_KEY not found in .env file")
@@ -927,4 +927,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Shutting down")
+
 
