@@ -30,17 +30,7 @@ ADMIN_IDS = {1647999523}
 DONATION_ALERTS_LINK = os.getenv("DONATION_ALERTS_LINK", "https://www.donationalerts.com/r/your_username")
 DB_PATH = "/app/data/bot.db"
 
-# Ensure the directory for the database exists and has correct permissions
-try:
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    os.chmod(os.path.dirname(DB_PATH), stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
-    logger.info(f"Created directory {os.path.dirname(DB_PATH)} with permissions {oct(os.stat(os.path.dirname(DB_PATH)).st_mode)}")
-    logger.info(f"Current working directory: {os.getcwd()}")
-except Exception as e:
-    logger.error(f"Failed to create or set permissions for {os.path.dirname(DB_PATH)}: {e}")
-    raise
-
-# Configure logging to both console and file
+# Configure logging before using logger
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -50,6 +40,16 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Ensure the directory for the database exists and has correct permissions
+try:
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    os.chmod(os.path.dirname(DB_PATH), stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+    logger.info(f"Created directory {os.path.dirname(DB_PATH)} with permissions {oct(os.stat(os.path.dirname(DB_PATH)).st_mode)}")
+    logger.info(f"Current working directory: {os.getcwd()}")
+except Exception as e:
+    logger.error(f"Failed to create or set permissions for {os.path.dirname(DB_PATH)}: {e}")
+    raise
 
 if not TELEGRAM_TOKEN or not OPENROUTER_API_KEY:
     raise ValueError("TELEGRAM_TOKEN or OPENROUTER_API_KEY not found in .env file")
