@@ -7,11 +7,8 @@ from typing import Dict, List, Tuple
 from datetime import datetime, date
 
 import httpx
-from dotenv import load_dotenv
-
 import base64
 import pdfplumber
-
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties
@@ -19,17 +16,14 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from openai import OpenAI
 
-# Загрузка .env (оставлено для совместимости, но ключи теперь в коде)
-load_dotenv()
-
-# Хардкоденные ключи (не рекомендуется для продакшена)
-TELEGRAM_TOKEN = "8415029501:AAFzA01cMwy4cF5Xvs8jNWoFVXh46p8LI5w"
-OPENROUTER_API_KEY = "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"
+# Хардкод переменных (замени OPENROUTER_API_KEY на свой!)
+TELEGRAM_TOKEN = "829753584:AAG3g4B-LwgnQUAYYC9Qen-DGBV1PbQYmQ"  # Твой токен из BotFather
+OPENROUTER_API_KEY = "YOUR_OPENROUTER_API_KEY_HERE"  # Замени на реальный ключ
 ADMIN_IDS = {1647999523}
-DONATION_ALERTS_LINK = os.getenv("DONATION_ALERTS_LINK", "https://www.donationalerts.com/r/your_username")
+DONATION_ALERTS_LINK = "https://www.donationalerts.com/r/your_username"
 
 if not TELEGRAM_TOKEN or not OPENROUTER_API_KEY:
-    raise ValueError("TELEGRAM_TOKEN or OPENROUTER_API_KEY not found in .env file")
+    raise ValueError("TELEGRAM_TOKEN or OPENROUTER_API_KEY not set! Check hardcoded values.")
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
@@ -42,6 +36,7 @@ dp = Dispatcher()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.info(f"Loaded TELEGRAM_TOKEN: {TELEGRAM_TOKEN[:10]}...")  # Отладка
 
 user_state: Dict[int, str] = {}
 user_memory: Dict[int, List[Tuple[str, str]]] = {}
@@ -583,12 +578,11 @@ async def handle_document(message: types.Message):
 
 async def main():
     logger.info("Bot is starting...")
-    while True:
-        try:
-            await dp.start_polling(bot, drop_pending_updates=True)
-        except Exception as e:
-            logger.error(f"Polling failed: {e}")
-            await asyncio.sleep(5)
+    await bot.delete_webhook(drop_pending_updates=True)  # Очищаем старые updates
+    try:
+        await dp.start_polling(bot, drop_pending_updates=True, timeout=30)
+    except Exception as e:
+        logger.error(f"Polling failed: {e}")
 
 if __name__ == "__main__":
     try:
