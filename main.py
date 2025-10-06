@@ -17,8 +17,8 @@ from aiogram.filters import Command
 from openai import OpenAI
 
 # Хардкод переменных (замени OPENROUTER_API_KEY на свой!)
-TELEGRAM_TOKEN = "829753584:AAG3g4B-LwgnQUAYYC9Qen-DGBV1PbQYmQ"  # Твой токен из BotFather
-OPENROUTER_API_KEY = "YOUR_OPENROUTER_API_KEY_HERE"  # Замени на реальный ключ
+TELEGRAM_TOKEN = "8297535584:AAFBkHwcYfoDNk54fvtq1SpDsKckZfLHfuc"  # Твой токен из BotFather
+OPENROUTER_API_KEY = "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"  # Замени на реальный ключ
 ADMIN_IDS = {1647999523}
 DONATION_ALERTS_LINK = "https://www.donationalerts.com/r/your_username"
 
@@ -589,3 +589,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Shutting down")
+
