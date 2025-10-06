@@ -8,6 +8,7 @@ from datetime import datetime, date
 
 import httpx
 from dotenv import load_dotenv
+
 import base64
 import pdfplumber
 
@@ -40,9 +41,6 @@ dp = Dispatcher()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Добавляем хранение последнего ответа
-last_response: Dict[int, str] = {}
-
 user_state: Dict[int, str] = {}
 user_memory: Dict[int, List[Tuple[str, str]]] = {}
 user_stats: Dict[int, Dict] = {}
@@ -62,7 +60,7 @@ main_kb = InlineKeyboardMarkup(
 
 profile_kb = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="btn_back_response")]
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="btn_back_main")]
     ]
 )
 
@@ -179,8 +177,14 @@ async def ocr_image_from_bytes(img_bytes: bytes):
 
 async def call_openai_with_prompt(user_id: int, prompt: str, is_math: bool = False):
     system_prompt = (
-        "Ты эксперт по всем школьным предметам: математике, физике, химии, литературе и другим. "
-        "Давай точные, структурированные и подробные ответы. Используй свой формат. \n"
+        "Ты эксперт по всем школьным предметам, включая математику, физику, литературу и другие. Решаешь задачи и отвечаешь на вопросы кратко и четко. "
+        "Для математических задач используй простые символы: √ для корня, ^ для степени, × для умножения, ÷ для деления, () для скобок, без лишних квадратных или других скобок. "
+        "Без LaTeX и специальных тегов.  "
+        "Для литературы давай точные и лаконичные ответы, опираясь на текст произведения, без лишних деталей. "
+        "Учитывай контекст предыдущих запросов и ответов, если они есть, чтобы ответить максимально релевантно. "
+        "Дай только решение или ответ, минимум текста. Если в запросе есть 'объясни' или 'поясни', добавь краткое объяснение. "
+        "Избегай повторений и лишних слов."
+        "Ответы должны быть структурированными."
     )
     try:
         loop = asyncio.get_event_loop()
@@ -199,12 +203,12 @@ async def call_openai_with_prompt(user_id: int, prompt: str, is_math: bool = Fal
             extra_body={},
             messages=messages,
             temperature=0.1,
-            max_tokens=2000  # Увеличиваем для подробных ответов
+            max_tokens=1500
         ))
         return completion.choices[0].message.content
     except Exception as e:
         logger.error(f"OpenAI API error: {e}")
-        return "Ошибка запроса. Попробуйте позже."
+        raise
 
 def get_user_stats_text():
     total_users = len(user_stats)
@@ -263,9 +267,30 @@ async def cmd_start(message: types.Message):
     user_state.pop(user_id, None)
     update_user_stats(user_id, "text")
     await message.answer(
-        "👋 <b>Привет!</b>\nЯ бот-помощник по дзшке — отправь текст, фото или файл (TXT/PDF) задачи, или выбери действие кнопкой ниже. Боту можно задавать ЛЮБЫЕ вопросы по учебе.",
+        "👋 <b>Привет!</b>\nЯ бот-помощник по дзшке — отправь текст, фото или файл (TXT/PDF) задачи, или выбери действие кнопкой ниже. Помощь по боту - /help.",
         reply_markup=main_kb
     )
+
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    user_id = message.from_user.id
+    update_user_stats(user_id, "text")
+    help_text = (
+        "👋 <b>Помощь по боту</b>\n"
+        "Я бот-помощник для решения учебных задач! Вот доступные команды и функции:\n\n"
+        "🔹 <b>Общие команды:</b>\n"
+        "  - /start — Начать работу с ботом\n"
+        "  - /help — Показать эту справку\n"
+        "🔹 <b>Функции бота:</b>\n"
+        "  - ✍️ Решить текст — Отправь текст или файл (TXT/PDF) задачи\n"
+        "  - 📸 Решить фото — Отправь фото с задачей\n"
+        "  - 📚 Конспект — Создаст конспект по тексту или файлу\n"
+        "  - 🗑 Очистить память — Очистит память ИИ\n"
+        "  - 👤 Личный кабинет — Посмотреть статистику\n\n"
+        "Лимит: 50 запросов в день. Используй кнопки ниже для действий!\n\n"
+        "<b>Если нужна помощь - @s1nay3</b>"
+    )
+    await message.answer(help_text, reply_markup=main_kb)
 
 @dp.message(Command("admpanel"))
 async def cmd_admin_panel(message: types.Message):
@@ -324,10 +349,9 @@ async def callbacks_handler(callback: types.CallbackQuery):
             f"📄 Всего документов: {user_data.get('document_count', 0)}"
         )
         await callback.message.edit_text(text, reply_markup=profile_kb)
-    elif data == "btn_back_response":
+    elif data == "btn_back_main":
         user_state[user_id] = None
-        last_answer = last_response.get(user_id, "Нет предыдущего ответа.")
-        await callback.message.edit_text(last_answer, reply_markup=main_kb)
+        await callback.message.edit_text("👋 <b>Главное меню</b>", reply_markup=main_kb)
     elif data == "btn_cancel":
         user_state[user_id] = None
         await callback.message.reply("❌ Отмена. Возврат в главное меню.", reply_markup=main_kb)
@@ -455,7 +479,7 @@ async def handle_text(message: types.Message):
     if state == "awaiting_conспект":
         prompt = f"Составь краткий конспект:\n\n{user_text}"
     else:
-        prompt = f"Решить задачу или ответь на вопрос:\n\n{user_text}"
+        prompt = f"Реши задачу или ответь на вопрос:\n\n{user_text}"
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
         answer = await call_openai_with_prompt(user_id, prompt, is_math=False)
@@ -463,11 +487,10 @@ async def handle_text(message: types.Message):
             update_request_count(user_id)
     except Exception as err:
         logger.exception("OpenAI error")
-        await message.reply("Ошибка запроса. Попробуйте позже.")
+        await message.reply(f"⚠️ Ошибка OpenAI API: {err}")
         user_state[user_id] = None
         return
     save_memory(user_id, user_text, answer)
-    last_response[user_id] = answer  # Сохраняем последний ответ
     user_state[user_id] = None
     await message.reply(answer, reply_markup=main_kb)
 
@@ -504,7 +527,7 @@ async def handle_photo(message: types.Message):
     if state == "awaiting_conспект":
         prompt = f"Составь краткий конспект:\n\n{ocr_text}"
     else:
-        prompt = f"Решить задачу или ответь на вопрос:\n\n{ocr_text}"
+        prompt = f"Реши задачу или ответь на вопрос:\n\n{ocr_text}"
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
         answer = await call_openai_with_prompt(user_id, prompt, is_math=False)
@@ -512,11 +535,10 @@ async def handle_photo(message: types.Message):
             update_request_count(user_id)
     except Exception as err:
         logger.exception("OpenAI error on photo")
-        await message.reply("Ошибка запроса. Попробуйте позже.")
+        await message.reply(f"⚠️ Ошибка OpenAI API: {err}")
         user_state[user_id] = None
         return
     save_memory(user_id, ocr_text, answer)
-    last_response[user_id] = answer  # Сохраняем последний ответ
     user_state[user_id] = None
     await message.reply(answer, reply_markup=main_kb)
 
@@ -564,7 +586,7 @@ async def handle_document(message: types.Message):
     if state == "awaiting_conспект":
         prompt = f"Составь краткий конспект:\n\n{extracted_text}"
     else:
-        prompt = f"Решить задачу или ответь на вопрос:\n\n{extracted_text}"
+        prompt = f"Реши задачу или ответь на вопрос:\n\n{extracted_text}"
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
         answer = await call_openai_with_prompt(user_id, prompt, is_math=False)
@@ -572,11 +594,10 @@ async def handle_document(message: types.Message):
             update_request_count(user_id)
     except Exception as err:
         logger.exception("OpenAI error on document")
-        await message.reply("Ошибка запроса. Попробуйте позже.")
+        await message.reply(f"⚠️ Ошибка запроса. Попробуйте позже")
         user_state[user_id] = None
         return
     save_memory(user_id, extracted_text, answer)
-    last_response[user_id] = answer  # Сохраняем последний ответ
     user_state[user_id] = None
     await message.reply(answer, reply_markup=main_kb)
 
