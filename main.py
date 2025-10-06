@@ -5,29 +5,29 @@ import logging
 import asyncio
 from typing import Dict, List, Tuple
 from datetime import datetime, date
+import json
 
 import httpx
+from dotenv import load_dotenv
 import base64
 import pdfplumber
+
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
 from aiogram.filters import Command
 from openai import OpenAI
-from dotenv import load_dotenv
 
-# Загружаем переменные из .env
 load_dotenv()
 
-# Получаем переменные окружения
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-ADMIN_IDS = {int(os.getenv("ADMIN_IDS", "1647999523"))}  # По умолчанию 1647999523
+ADMIN_IDS = {1647999523}
 DONATION_ALERTS_LINK = os.getenv("DONATION_ALERTS_LINK", "https://www.donationalerts.com/r/your_username")
 
 if not TELEGRAM_TOKEN or not OPENROUTER_API_KEY:
-    raise ValueError("TELEGRAM_TOKEN or OPENROUTER_API_KEY not set! Check .env file.")
+    raise ValueError("TELEGRAM_TOKEN or OPENROUTER_API_KEY not found in .env file")
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
@@ -40,30 +40,67 @@ dp = Dispatcher()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logger.info(f"Loaded TELEGRAM_TOKEN: {TELEGRAM_TOKEN[:10]}...")  # Отладка
+
+# Добавляем хранение последнего ответа
+last_response: Dict[int, str] = {}
+
+# Хранение премиум-статуса (загружаем/сохраняем в файл)
+PREMIUM_FILE = "premium_users.json"
+user_premium: Dict[int, bool] = {}
+try:
+    with open(PREMIUM_FILE, "r") as f:
+        user_premium = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError) as e:
+    logger.warning(f"Failed to load premium_users.json: {e}")
+    user_premium = {}
+
+def save_premium():
+    try:
+        with open(PREMIUM_FILE, "w") as f:
+            json.dump(user_premium, f)
+    except Exception as e:
+        logger.error(f"Failed to save premium_users.json: {e}")
 
 user_state: Dict[int, str] = {}
 user_memory: Dict[int, List[Tuple[str, str]]] = {}
 user_stats: Dict[int, Dict] = {}
 user_requests: Dict[int, Dict] = {}
 MEMORY_LIMIT = 10
-REQUEST_LIMIT = 50
+FREE_REQUEST_LIMIT = 50
+PREMIUM_REQUEST_LIMIT = 200
 
 main_kb = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="✍️ Решить текст", callback_data="btn_solve_text"),
          InlineKeyboardButton(text="📸 Решить фото", callback_data="btn_solve_photo")],
-        [InlineKeyboardButton(text="📚 Конспект", callback_data="btn_conспект")],
+        [InlineKeyboardButton(text="📚 Конспект", callback_data="btn_conspект")],
         [InlineKeyboardButton(text="🗑 Очистить память", callback_data="btn_clear_memory"),
          InlineKeyboardButton(text="👤 Личный кабинет", callback_data="btn_profile")]
     ]
 )
 
-profile_kb = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="btn_back_main")]
-    ]
-)
+def get_profile_kb(user_id: int):
+    if user_premium.get(user_id, False):
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="btn_back_response")]
+            ]
+        )
+    else:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💎 Купить премиум", callback_data="btn_buy_premium")],
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="btn_back_response")]
+            ]
+        )
+
+def get_buy_premium_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Купить навсегда (50 ⭐)", callback_data="btn_buy_premium_forever")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="btn_back_to_profile")]
+        ]
+    )
 
 cancel_kb = InlineKeyboardMarkup(
     inline_keyboard=[
@@ -78,6 +115,7 @@ admin_main_kb = InlineKeyboardMarkup(
         [InlineKeyboardButton(text="📢 Создать рассылку", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="🔍 Просмотр памяти пользователя", callback_data="admin_user_memory")],
         [InlineKeyboardButton(text="📈 Активность пользователей", callback_data="admin_activity")],
+        [InlineKeyboardButton(text="💎 Выдать премиум", callback_data="admin_grant_premium")],
         [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="admin_back_main")]
     ]
 )
@@ -142,7 +180,8 @@ def get_requests_left(user_id: int):
     today = date.today().isoformat()
     if user_id not in user_requests or user_requests[user_id]["date"] != today:
         user_requests[user_id] = {"count": 0, "date": today}
-    return REQUEST_LIMIT - user_requests[user_id]["count"] if user_id not in ADMIN_IDS else float('inf')
+    limit = PREMIUM_REQUEST_LIMIT if user_premium.get(user_id, False) else FREE_REQUEST_LIMIT
+    return limit - user_requests[user_id]["count"] if user_id not in ADMIN_IDS else float('inf')
 
 async def ocr_image_from_bytes(img_bytes: bytes):
     try:
@@ -290,7 +329,7 @@ async def callbacks_handler(callback: types.CallbackQuery):
     await callback.answer()
     if data == "btn_solve_text":
         if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-            await callback.message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+            await callback.message.reply("У вас кончились запросы.", reply_markup=main_kb)
             return
         user_state[user_id] = "awaiting_text"
         await callback.message.reply(
@@ -298,16 +337,16 @@ async def callbacks_handler(callback: types.CallbackQuery):
             reply_markup=cancel_kb)
     elif data == "btn_solve_photo":
         if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-            await callback.message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+            await callback.message.reply("У вас кончились запросы.", reply_markup=main_kb)
             return
         user_state[user_id] = "awaiting_photo"
         await callback.message.reply("📸 Отлично — отправь фото задания. Нажми ❌ Отмена, чтобы выйти.",
                                      reply_markup=cancel_kb)
-    elif data == "btn_conспект":
+    elif data == "btn_conspект":
         if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-            await callback.message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+            await callback.message.reply("У вас кончились запросы.", reply_markup=main_kb)
             return
-        user_state[user_id] = "awaiting_conспект"
+        user_state[user_id] = "awaiting_conspekt"
         await callback.message.reply(
             "📚 Хорошо — пришли тему, текст или файл (TXT/PDF), по которому надо сделать конспект.",
             reply_markup=cancel_kb)
@@ -318,22 +357,67 @@ async def callbacks_handler(callback: types.CallbackQuery):
         user_data = user_stats.get(user_id, {})
         requests_left = get_requests_left(user_id)
         first_seen = user_data.get("first_seen", datetime.now().isoformat())
+        premium_status = " (Премиум)" if user_premium.get(user_id, False) else ""
         text = (
             f"👤 <b>Личный кабинет</b>\n"
             f"🆔 ID: {user_id}\n"
             f"📅 Первый визит: {datetime.fromisoformat(first_seen).strftime('%d.%m.%Y %H:%M')}\n"
-            f"📈 Остаток запросов: {requests_left if requests_left != float('inf') else '∞ (админ)'}\n"
+            f"📈 Остаток запросов: {requests_left if requests_left != float('inf') else '∞ (админ)'}{premium_status}\n"
             f"💬 Всего сообщений: {user_data.get('message_count', 0)}\n"
             f"📸 Всего фото: {user_data.get('photo_count', 0)}\n"
             f"📄 Всего документов: {user_data.get('document_count', 0)}"
         )
-        await callback.message.edit_text(text, reply_markup=profile_kb)
-    elif data == "btn_back_main":
+        await callback.message.edit_text(text, reply_markup=get_profile_kb(user_id))
+    elif data == "btn_buy_premium":
+        await callback.message.edit_text(
+            "💎 <b>Выберите подписку:</b>\nПолучите 200 запросов в день навсегда!",
+            reply_markup=get_buy_premium_kb()
+        )
+    elif data == "btn_buy_premium_forever":
+        await bot.send_invoice(
+            chat_id=user_id,
+            title="Премиум-подписка навсегда",
+            description="🔥 Премиум навсегда!\nПолучите 200 запросов в день без ограничений времени за 50 ⭐. Наслаждайтесь всеми функциями бота без лимитов!",
+            payload="premium_forever",
+            provider_token="",  # Пустой для Telegram Stars
+            currency="XTR",
+            prices=[LabeledPrice(label="Премиум навсегда", amount=50)]
+        )
+    elif data == "btn_back_to_profile":
+        user_data = user_stats.get(user_id, {})
+        requests_left = get_requests_left(user_id)
+        first_seen = user_data.get("first_seen", datetime.now().isoformat())
+        premium_status = " (Премиум)" if user_premium.get(user_id, False) else ""
+        text = (
+            f"👤 <b>Личный кабинет</b>\n"
+            f"🆔 ID: {user_id}\n"
+            f"📅 Первый визит: {datetime.fromisoformat(first_seen).strftime('%d.%m.%Y %H:%M')}\n"
+            f"📈 Остаток запросов: {requests_left if requests_left != float('inf') else '∞ (админ)'}{premium_status}\n"
+            f"💬 Всего сообщений: {user_data.get('message_count', 0)}\n"
+            f"📸 Всего фото: {user_data.get('photo_count', 0)}\n"
+            f"📄 Всего документов: {user_data.get('document_count', 0)}"
+        )
+        await callback.message.edit_text(text, reply_markup=get_profile_kb(user_id))
+    elif data == "btn_back_response":
         user_state[user_id] = None
-        await callback.message.edit_text("👋 <b>Главное меню</b>", reply_markup=main_kb)
+        last_answer = last_response.get(user_id, "Нет предыдущего ответа.")
+        await callback.message.edit_text(last_answer, reply_markup=main_kb)
     elif data == "btn_cancel":
         user_state[user_id] = None
         await callback.message.reply("❌ Отмена. Возврат в главное меню.", reply_markup=main_kb)
+
+@dp.pre_checkout_query()
+async def pre_checkout(pre_checkout_query: PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+@dp.message(F.content_type == types.ContentType.SUCCESSFUL_PAYMENT)
+async def successful_payment(message: types.Message):
+    user_id = message.from_user.id
+    logger.info(f"Payment success for user {user_id}")  # Для логов
+    user_premium[user_id] = True
+    save_premium()
+    await message.answer("🎉 Спасибо за покупку! У вас теперь премиум-подписка навсегда (200 запросов в день).")
+
 
 @dp.callback_query(F.data.startswith("admin_"))
 async def admin_callbacks_handler(callback: types.CallbackQuery):
@@ -397,6 +481,12 @@ async def admin_callbacks_handler(callback: types.CallbackQuery):
             "📢 <b>Создание рассылки</b>\nОтправьте сообщение для рассылки:",
             reply_markup=admin_back_kb
         )
+    elif data == "admin_grant_premium":
+        user_state[user_id] = "admin_grant_premium"
+        await callback.message.edit_text(
+            "💎 <b>Выдача премиум</b>\nОтправьте ID пользователя:",
+            reply_markup=admin_back_kb
+        )
     elif data == "admin_confirm_broadcast":
         if user_id in admin_broadcast_state:
             message_text = admin_broadcast_state[user_id]
@@ -451,11 +541,21 @@ async def handle_text(message: types.Message):
             await message.reply("❌ Неверный ID пользователя.", reply_markup=admin_back_kb)
         user_state[user_id] = None
         return
+    elif user_id in ADMIN_IDS and state == "admin_grant_premium":
+        try:
+            target_user_id = int(user_text)
+            user_premium[target_user_id] = True
+            save_premium()
+            await message.reply(f"💎 Премиум выдан пользователю {target_user_id}.", reply_markup=admin_back_kb)
+        except ValueError:
+            await message.reply("❌ Неверный ID пользователя.", reply_markup=admin_back_kb)
+        user_state[user_id] = None
+        return
     update_user_stats(user_id, "text")
     if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-        await message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+        await message.reply("У вас кончились запросы.", reply_markup=main_kb)
         return
-    if state == "awaiting_conспект":
+    if state == "awaiting_conspekt":
         prompt = f"Составь краткий конспект:\n\n{user_text}"
     else:
         prompt = f"Реши задачу или ответь на вопрос:\n\n{user_text}"
@@ -470,6 +570,7 @@ async def handle_text(message: types.Message):
         user_state[user_id] = None
         return
     save_memory(user_id, user_text, answer)
+    last_response[user_id] = answer  # Сохраняем последний ответ
     user_state[user_id] = None
     await message.reply(answer, reply_markup=main_kb)
 
@@ -479,7 +580,7 @@ async def handle_photo(message: types.Message):
     state = user_state.get(user_id)
     update_user_stats(user_id, "photo")
     if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-        await message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+        await message.reply("У вас кончились запросы.", reply_markup=main_kb)
         return
     photo = message.photo[-1]
     try:
@@ -503,7 +604,7 @@ async def handle_photo(message: types.Message):
                             reply_markup=main_kb)
         user_state[user_id] = None
         return
-    if state == "awaiting_conспект":
+    if state == "awaiting_conspekt":
         prompt = f"Составь краткий конспект:\n\n{ocr_text}"
     else:
         prompt = f"Реши задачу или ответь на вопрос:\n\n{ocr_text}"
@@ -518,6 +619,7 @@ async def handle_photo(message: types.Message):
         user_state[user_id] = None
         return
     save_memory(user_id, ocr_text, answer)
+    last_response[user_id] = answer  # Сохраняем последний ответ
     user_state[user_id] = None
     await message.reply(answer, reply_markup=main_kb)
 
@@ -525,12 +627,12 @@ async def handle_photo(message: types.Message):
 async def handle_document(message: types.Message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
-    if state not in ["awaiting_text", "awaiting_conспект"]:
+    if state not in ["awaiting_text", "awaiting_conspekt"]:
         await message.reply("📎 Для обработки файлов выбери 'Решить текст' или 'Конспект'.")
         return
     update_user_stats(user_id, "document")
     if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-        await message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+        await message.reply("У вас кончились запросы.", reply_markup=main_kb)
         return
     document = message.document
     file_name_lower = document.file_name.lower()
@@ -562,7 +664,7 @@ async def handle_document(message: types.Message):
         await message.reply("🤖 Не удалось извлечь текст. Если PDF сканированный, отправь как фото.")
         user_state[user_id] = None
         return
-    if state == "awaiting_conспект":
+    if state == "awaiting_conspekt":
         prompt = f"Составь краткий конспект:\n\n{extracted_text}"
     else:
         prompt = f"Реши задачу или ответь на вопрос:\n\n{extracted_text}"
@@ -573,20 +675,22 @@ async def handle_document(message: types.Message):
             update_request_count(user_id)
     except Exception as err:
         logger.exception("OpenAI error on document")
-        await message.reply(f"⚠️ Ошибка запроса. Попробуйте позже")
+        await message.reply(f"⚠️ Ошибка OpenAI API: {err}")
         user_state[user_id] = None
         return
     save_memory(user_id, extracted_text, answer)
+    last_response[user_id] = answer  # Сохраняем последний ответ
     user_state[user_id] = None
     await message.reply(answer, reply_markup=main_kb)
 
 async def main():
     logger.info("Bot is starting...")
-    await bot.delete_webhook(drop_pending_updates=True)  # Очищаем старые updates
-    try:
-        await dp.start_polling(bot, drop_pending_updates=True, timeout=30)
-    except Exception as e:
-        logger.error(f"Polling failed: {e}")
+    while True:
+        try:
+            await dp.start_polling(bot, drop_pending_updates=True)
+        except Exception as e:
+            logger.error(f"Polling failed: {e}")
+            await asyncio.sleep(5)
 
 if __name__ == "__main__":
     try:
