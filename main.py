@@ -3,7 +3,7 @@ import os
 import io
 import logging
 import asyncio
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Set
 from datetime import datetime, date
 
 import httpx
@@ -16,7 +16,7 @@ import sqlite3
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.filters import Command
 from openai import OpenAI
 
@@ -43,7 +43,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # SQLite connection (use a persistent path on Railway, e.g., via volume mount like '/data/bot.db')
-DB_PATH = '/data/bot.db'  # On Railway, mount a volume and use '/path/to/volume/bot.db'
+DB_PATH = 'bot.db'  # On Railway, mount a volume and use '/path/to/volume/bot.db'
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)  # Allow async usage, but wrap in executor if needed
 c = conn.cursor()
 
@@ -66,14 +66,18 @@ c.execute('''CREATE TABLE IF NOT EXISTS user_memory
               question TEXT,
               answer TEXT,
               timestamp TEXT)''')
+c.execute('''CREATE TABLE IF NOT EXISTS premium_users
+             (user_id INTEGER PRIMARY KEY)''')
 conn.commit()
 
 user_state: Dict[int, str] = {}  # Temporary, keep in memory
 user_memory: Dict[int, List[Tuple[str, str]]] = {}
 user_stats: Dict[int, Dict] = {}
 user_requests: Dict[int, Dict] = {}
+premium_users: Set[int] = set()
 MEMORY_LIMIT = 10
-REQUEST_LIMIT = 50
+DEFAULT_REQUEST_LIMIT = 50
+PREMIUM_REQUEST_LIMIT = 200
 
 admin_broadcast_state: Dict[int, str] = {}  # Temporary, keep in memory
 
@@ -106,6 +110,9 @@ admin_main_kb = InlineKeyboardMarkup(
         [InlineKeyboardButton(text="📢 Создать рассылку", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="🔍 Просмотр памяти пользователя", callback_data="admin_user_memory")],
         [InlineKeyboardButton(text="📈 Активность пользователей", callback_data="admin_activity")],
+        [InlineKeyboardButton(text="💎 Добавить Premium", callback_data="admin_add_premium")],
+        [InlineKeyboardButton(text="🗑 Удалить Premium", callback_data="admin_remove_premium")],
+        [InlineKeyboardButton(text="📥 Скачать бэкап", callback_data="admin_backup")],
         [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="admin_back_main")]
     ]
 )
@@ -124,7 +131,7 @@ admin_back_kb = InlineKeyboardMarkup(
 )
 
 def load_data():
-    global user_stats, user_requests, user_memory
+    global user_stats, user_requests, user_memory, premium_users
     # Load user_stats
     user_stats = {}
     c.execute("SELECT * FROM users")
@@ -162,6 +169,9 @@ def load_data():
             conn.commit()
             # Trim in-memory list
             user_memory[uid] = mem[-MEMORY_LIMIT:]
+    # Load premium_users
+    c.execute("SELECT user_id FROM premium_users")
+    premium_users = {row[0] for row in c.fetchall()}
 
 def update_user_stats(user_id: int, message_type: str = "text"):
     now = datetime.now().isoformat()
@@ -217,6 +227,14 @@ def build_memory_text(user_id: int):
         lines.append(f"<b>Ответ:</b> {a[:300]}\n")
     return "\n".join(lines)
 
+def get_request_limit(user_id: int):
+    if user_id in ADMIN_IDS:
+        return float('inf')
+    elif user_id in premium_users:
+        return PREMIUM_REQUEST_LIMIT
+    else:
+        return DEFAULT_REQUEST_LIMIT
+
 def update_request_count(user_id: int):
     today = date.today().isoformat()
     if user_id not in user_requests or user_requests[user_id]["date"] != today:
@@ -224,7 +242,7 @@ def update_request_count(user_id: int):
         c.execute("INSERT OR REPLACE INTO user_requests (user_id, date, count) VALUES (?, ?, 0)", (user_id, today))
         conn.commit()
     user_requests[user_id]["count"] += 1
-    c.execute("UPDATE user_requests SET count=? WHERE user_id=? AND date=?", 
+    c.execute("UPDATE user_requests SET count=? WHERE user_id=? AND date=?",
               (user_requests[user_id]["count"], user_id, today))
     conn.commit()
 
@@ -234,7 +252,9 @@ def get_requests_left(user_id: int):
         user_requests[user_id] = {"count": 0, "date": today}
         c.execute("INSERT OR REPLACE INTO user_requests (user_id, date, count) VALUES (?, ?, 0)", (user_id, today))
         conn.commit()
-    return REQUEST_LIMIT - user_requests[user_id]["count"] if user_id not in ADMIN_IDS else float('inf')
+    count = user_requests[user_id]["count"]
+    limit = get_request_limit(user_id)
+    return limit - count if limit != float('inf') else float('inf')
 
 async def ocr_image_from_bytes(img_bytes: bytes):
     try:
@@ -336,8 +356,9 @@ def get_users_list():
     for i, (user_id, stats) in enumerate(user_stats.items(), 1):
         first_seen = datetime.fromisoformat(stats["first_seen"]).strftime("%d.%m.%Y")
         last_seen = datetime.fromisoformat(stats["last_seen"]).strftime("%d.%m.%Y %H:%M")
+        status = "Admin" if user_id in ADMIN_IDS else ("Premium" if user_id in premium_users else "Обычный")
         text.append(
-            f"{i}. ID: {user_id} | Сообщений: {stats['message_count']} | Фото: {stats['photo_count']} | Документы: {stats['document_count']}")
+            f"{i}. ID: {user_id} | {status} | Сообщений: {stats['message_count']} | Фото: {stats['photo_count']} | Документы: {stats['document_count']}")
         text.append(f"   Первый визит: {first_seen} | Последний: {last_seen}\n")
     return "\n".join(text)
 
@@ -381,7 +402,7 @@ async def cmd_help(message: types.Message):
         "  - 📚 Конспект — Создаст конспект по тексту или файлу\n"
         "  - 🗑 Очистить память — Очистит память ИИ\n"
         "  - 👤 Личный кабинет — Посмотреть статистику\n\n"
-        "Лимит: 50 запросов в день. Используй кнопки ниже для действий!\n\n"
+        "Лимит: 50 запросов в день (200 для Premium). Используй кнопки ниже для действий!\n\n"
         "<b>Если нужна помощь - @s1nay3</b>"
     )
     await message.answer(help_text, reply_markup=main_kb)
@@ -405,7 +426,7 @@ async def callbacks_handler(callback: types.CallbackQuery):
     await callback.answer()
     if data == "btn_solve_text":
         if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-            await callback.message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+            await callback.message.reply("⚠️ Лимит запросов исчерпан.", reply_markup=main_kb)
             return
         user_state[user_id] = "awaiting_text"
         await callback.message.reply(
@@ -413,16 +434,16 @@ async def callbacks_handler(callback: types.CallbackQuery):
             reply_markup=cancel_kb)
     elif data == "btn_solve_photo":
         if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-            await callback.message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+            await callback.message.reply("⚠️ Лимит запросов исчерпан.", reply_markup=main_kb)
             return
         user_state[user_id] = "awaiting_photo"
         await callback.message.reply("📸 Отлично — отправь фото задания. Нажми ❌ Отмена, чтобы выйти.",
                                      reply_markup=cancel_kb)
-    elif data == "btn_conspект":
+    elif data == "btn_conspekt":
         if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-            await callback.message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+            await callback.message.reply("⚠️ Лимит запросов исчерпан.", reply_markup=main_kb)
             return
-        user_state[user_id] = "awaiting_conspект"
+        user_state[user_id] = "awaiting_conspekt"
         await callback.message.reply(
             "📚 Хорошо — пришли тему, текст или файл (TXT/PDF), по которому надо сделать конспект.",
             reply_markup=cancel_kb)
@@ -436,11 +457,14 @@ async def callbacks_handler(callback: types.CallbackQuery):
         user_data = user_stats.get(user_id, {})
         requests_left = get_requests_left(user_id)
         first_seen = user_data.get("first_seen", datetime.now().isoformat())
+        status = "Админ" if user_id in ADMIN_IDS else ("Premium" if user_id in premium_users else "Обычный")
+        requests_text = "∞ (админ)" if requests_left == float('inf') else f"{requests_left} ({'из 200' if user_id in premium_users else 'из 50'})"
         text = (
             f"👤 <b>Личный кабинет</b>\n"
             f"🆔 ID: {user_id}\n"
             f"📅 Первый визит: {datetime.fromisoformat(first_seen).strftime('%d.%m.%Y %H:%M')}\n"
-            f"📈 Остаток запросов: {requests_left if requests_left != float('inf') else '∞ (админ)'}\n"
+            f"👑 Статус: {status}\n"
+            f"📈 Остаток запросов: {requests_text}\n"
             f"💬 Всего сообщений: {user_data.get('message_count', 0)}\n"
             f"📸 Всего фото: {user_data.get('photo_count', 0)}\n"
             f"📄 Всего документов: {user_data.get('document_count', 0)}"
@@ -515,6 +539,24 @@ async def admin_callbacks_handler(callback: types.CallbackQuery):
             "📢 <b>Создание рассылки</b>\nОтправьте сообщение для рассылки:",
             reply_markup=admin_back_kb
         )
+    elif data == "admin_add_premium":
+        user_state[user_id] = "admin_add_premium"
+        await callback.message.edit_text(
+            "💎 <b>Добавление Premium</b>\nОтправьте ID пользователя:",
+            reply_markup=admin_back_kb
+        )
+    elif data == "admin_remove_premium":
+        user_state[user_id] = "admin_remove_premium"
+        await callback.message.edit_text(
+            "🗑 <b>Удаление Premium</b>\nОтправьте ID пользователя:",
+            reply_markup=admin_back_kb
+        )
+    elif data == "admin_backup":
+        try:
+            await bot.send_document(user_id, FSInputFile(DB_PATH), caption="Бэкап базы данных bot.db")
+        except Exception as e:
+            logger.error(f"Failed to send backup: {e}")
+            await callback.message.edit_text("⚠️ Ошибка при отправке бэкапа.", reply_markup=admin_back_kb)
     elif data == "admin_confirm_broadcast":
         if user_id in admin_broadcast_state:
             message_text = admin_broadcast_state[user_id]
@@ -569,11 +611,39 @@ async def handle_text(message: types.Message):
             await message.reply("❌ Неверный ID пользователя.", reply_markup=admin_back_kb)
         user_state[user_id] = None
         return
+    elif user_id in ADMIN_IDS and state == "admin_add_premium":
+        try:
+            target_user_id = int(user_text)
+            if target_user_id not in premium_users:
+                premium_users.add(target_user_id)
+                c.execute("INSERT OR IGNORE INTO premium_users (user_id) VALUES (?)", (target_user_id,))
+                conn.commit()
+                await message.reply(f"✅ Premium добавлен пользователю {target_user_id}.", reply_markup=admin_back_kb)
+            else:
+                await message.reply("⚠️ Пользователь уже имеет Premium.", reply_markup=admin_back_kb)
+        except ValueError:
+            await message.reply("❌ Неверный ID пользователя.", reply_markup=admin_back_kb)
+        user_state[user_id] = None
+        return
+    elif user_id in ADMIN_IDS and state == "admin_remove_premium":
+        try:
+            target_user_id = int(user_text)
+            if target_user_id in premium_users:
+                premium_users.remove(target_user_id)
+                c.execute("DELETE FROM premium_users WHERE user_id=?", (target_user_id,))
+                conn.commit()
+                await message.reply(f"✅ Premium удален у пользователя {target_user_id}.", reply_markup=admin_back_kb)
+            else:
+                await message.reply("⚠️ Пользователь не имеет Premium.", reply_markup=admin_back_kb)
+        except ValueError:
+            await message.reply("❌ Неверный ID пользователя.", reply_markup=admin_back_kb)
+        user_state[user_id] = None
+        return
     update_user_stats(user_id, "text")
     if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-        await message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+        await message.reply("⚠️ Лимит запросов исчерпан.", reply_markup=main_kb)
         return
-    if state == "awaiting_conspект":
+    if state == "awaiting_conspekt":
         prompt = f"Составь краткий конспект:\n\n{user_text}"
     else:
         prompt = f"Реши задачу или ответь на вопрос:\n\n{user_text}"
@@ -597,7 +667,7 @@ async def handle_photo(message: types.Message):
     state = user_state.get(user_id)
     update_user_stats(user_id, "photo")
     if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-        await message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+        await message.reply("⚠️ Лимит запросов исчерпан.", reply_markup=main_kb)
         return
     photo = message.photo[-1]
     try:
@@ -621,7 +691,7 @@ async def handle_photo(message: types.Message):
                             reply_markup=main_kb)
         user_state[user_id] = None
         return
-    if state == "awaiting_conspект":
+    if state == "awaiting_conspekt":
         prompt = f"Составь краткий конспект:\n\n{ocr_text}"
     else:
         prompt = f"Реши задачу или ответь на вопрос:\n\n{ocr_text}"
@@ -643,12 +713,12 @@ async def handle_photo(message: types.Message):
 async def handle_document(message: types.Message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
-    if state not in ["awaiting_text", "awaiting_conspект"]:
+    if state not in ["awaiting_text", "awaiting_conspekt"]:
         await message.reply("📎 Для обработки файлов выбери 'Решить текст' или 'Конспект'.")
         return
     update_user_stats(user_id, "document")
     if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
-        await message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
+        await message.reply("⚠️ Лимит запросов исчерпан.", reply_markup=main_kb)
         return
     document = message.document
     file_name_lower = document.file_name.lower()
@@ -680,7 +750,7 @@ async def handle_document(message: types.Message):
         await message.reply("🤖 Не удалось извлечь текст. Если PDF сканированный, отправь как фото.")
         user_state[user_id] = None
         return
-    if state == "awaiting_conspект":
+    if state == "awaiting_conspekt":
         prompt = f"Составь краткий конспект:\n\n{extracted_text}"
     else:
         prompt = f"Реши задачу или ответь на вопрос:\n\n{extracted_text}"
