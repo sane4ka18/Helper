@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 import base64
 import pdfplumber
+import sqlite3
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode, ChatAction
@@ -41,12 +42,40 @@ dp = Dispatcher()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-user_state: Dict[int, str] = {}
+# SQLite connection (use a persistent path on Railway, e.g., via volume mount like '/data/bot.db')
+DB_PATH = '/data/bot.db'  # On Railway, mount a volume and use '/path/to/volume/bot.db'
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)  # Allow async usage, but wrap in executor if needed
+c = conn.cursor()
+
+# Create tables if not exist
+c.execute('''CREATE TABLE IF NOT EXISTS users
+             (user_id INTEGER PRIMARY KEY,
+              first_seen TEXT,
+              last_seen TEXT,
+              message_count INTEGER DEFAULT 0,
+              photo_count INTEGER DEFAULT 0,
+              document_count INTEGER DEFAULT 0)''')
+c.execute('''CREATE TABLE IF NOT EXISTS user_requests
+             (user_id INTEGER,
+              date TEXT,
+              count INTEGER DEFAULT 0,
+              PRIMARY KEY (user_id, date))''')
+c.execute('''CREATE TABLE IF NOT EXISTS user_memory
+             (id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER,
+              question TEXT,
+              answer TEXT,
+              timestamp TEXT)''')
+conn.commit()
+
+user_state: Dict[int, str] = {}  # Temporary, keep in memory
 user_memory: Dict[int, List[Tuple[str, str]]] = {}
 user_stats: Dict[int, Dict] = {}
 user_requests: Dict[int, Dict] = {}
 MEMORY_LIMIT = 10
 REQUEST_LIMIT = 50
+
+admin_broadcast_state: Dict[int, str] = {}  # Temporary, keep in memory
 
 main_kb = InlineKeyboardMarkup(
     inline_keyboard=[
@@ -94,7 +123,45 @@ admin_back_kb = InlineKeyboardMarkup(
     ]
 )
 
-admin_broadcast_state: Dict[int, str] = {}
+def load_data():
+    global user_stats, user_requests, user_memory
+    # Load user_stats
+    user_stats = {}
+    c.execute("SELECT * FROM users")
+    for row in c.fetchall():
+        user_id, first_seen, last_seen, message_count, photo_count, document_count = row
+        user_stats[user_id] = {
+            "first_seen": first_seen,
+            "last_seen": last_seen,
+            "message_count": message_count,
+            "photo_count": photo_count,
+            "document_count": document_count
+        }
+    # Load user_requests
+    user_requests = {}
+    c.execute("SELECT * FROM user_requests")
+    for row in c.fetchall():
+        user_id, date_str, count = row
+        user_requests[user_id] = {"date": date_str, "count": count}
+    # Load user_memory
+    user_memory = {}
+    c.execute("SELECT user_id, question, answer FROM user_memory ORDER BY timestamp ASC")
+    for row in c.fetchall():
+        user_id, question, answer = row
+        user_memory.setdefault(user_id, []).append((question, answer))
+    # Enforce MEMORY_LIMIT by trimming old entries
+    for uid in list(user_memory.keys()):
+        mem = user_memory[uid]
+        if len(mem) > MEMORY_LIMIT:
+            excess = len(mem) - MEMORY_LIMIT
+            # Delete excess from DB
+            c.execute("SELECT id FROM user_memory WHERE user_id=? ORDER BY timestamp ASC LIMIT ?", (uid, excess))
+            ids_to_del = [r[0] for r in c.fetchall()]
+            for del_id in ids_to_del:
+                c.execute("DELETE FROM user_memory WHERE id=?", (del_id,))
+            conn.commit()
+            # Trim in-memory list
+            user_memory[uid] = mem[-MEMORY_LIMIT:]
 
 def update_user_stats(user_id: int, message_type: str = "text"):
     now = datetime.now().isoformat()
@@ -106,6 +173,9 @@ def update_user_stats(user_id: int, message_type: str = "text"):
             "photo_count": 0,
             "document_count": 0
         }
+        c.execute("INSERT INTO users (user_id, first_seen, last_seen, message_count, photo_count, document_count) VALUES (?, ?, ?, 0, 0, 0)",
+                  (user_id, now, now))
+        conn.commit()
     user_stats[user_id]["last_seen"] = now
     if message_type == "text":
         user_stats[user_id]["message_count"] += 1
@@ -113,11 +183,28 @@ def update_user_stats(user_id: int, message_type: str = "text"):
         user_stats[user_id]["photo_count"] += 1
     elif message_type == "document":
         user_stats[user_id]["document_count"] += 1
+    # Update DB
+    c.execute("""UPDATE users SET last_seen=?, message_count=?, photo_count=?, document_count=?
+                 WHERE user_id=?""",
+              (now, user_stats[user_id]["message_count"], user_stats[user_id]["photo_count"],
+               user_stats[user_id]["document_count"], user_id))
+    conn.commit()
 
 def save_memory(user_id: int, question: str, answer: str):
     mem = user_memory.setdefault(user_id, [])
+    timestamp = datetime.now().isoformat()
     mem.append((question, answer))
+    c.execute("INSERT INTO user_memory (user_id, question, answer, timestamp) VALUES (?, ?, ?, ?)",
+              (user_id, question, answer, timestamp))
+    conn.commit()
     if len(mem) > MEMORY_LIMIT:
+        # Delete oldest from DB
+        c.execute("SELECT id FROM user_memory WHERE user_id=? ORDER BY timestamp ASC LIMIT 1", (user_id,))
+        del_id = c.fetchone()
+        if del_id:
+            c.execute("DELETE FROM user_memory WHERE id=?", (del_id[0],))
+            conn.commit()
+        # Trim in-memory
         mem.pop(0)
 
 def build_memory_text(user_id: int):
@@ -134,13 +221,19 @@ def update_request_count(user_id: int):
     today = date.today().isoformat()
     if user_id not in user_requests or user_requests[user_id]["date"] != today:
         user_requests[user_id] = {"count": 0, "date": today}
-    if user_id not in ADMIN_IDS:
-        user_requests[user_id]["count"] += 1
+        c.execute("INSERT OR REPLACE INTO user_requests (user_id, date, count) VALUES (?, ?, 0)", (user_id, today))
+        conn.commit()
+    user_requests[user_id]["count"] += 1
+    c.execute("UPDATE user_requests SET count=? WHERE user_id=? AND date=?", 
+              (user_requests[user_id]["count"], user_id, today))
+    conn.commit()
 
 def get_requests_left(user_id: int):
     today = date.today().isoformat()
     if user_id not in user_requests or user_requests[user_id]["date"] != today:
         user_requests[user_id] = {"count": 0, "date": today}
+        c.execute("INSERT OR REPLACE INTO user_requests (user_id, date, count) VALUES (?, ?, 0)", (user_id, today))
+        conn.commit()
     return REQUEST_LIMIT - user_requests[user_id]["count"] if user_id not in ADMIN_IDS else float('inf')
 
 async def ocr_image_from_bytes(img_bytes: bytes):
@@ -334,7 +427,10 @@ async def callbacks_handler(callback: types.CallbackQuery):
             "📚 Хорошо — пришли тему, текст или файл (TXT/PDF), по которому надо сделать конспект.",
             reply_markup=cancel_kb)
     elif data == "btn_clear_memory":
-        user_memory[user_id] = []
+        if user_id in user_memory:
+            del user_memory[user_id]
+        c.execute("DELETE FROM user_memory WHERE user_id=?", (user_id,))
+        conn.commit()
         await callback.message.reply("🧹 Память очищена.", reply_markup=main_kb)
     elif data == "btn_profile":
         user_data = user_stats.get(user_id, {})
@@ -477,7 +573,7 @@ async def handle_text(message: types.Message):
     if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
         await message.reply("⚠️ Лимит запросов (50 в день) исчерпан.", reply_markup=main_kb)
         return
-    if state == "awaiting_conспект":
+    if state == "awaiting_conspект":
         prompt = f"Составь краткий конспект:\n\n{user_text}"
     else:
         prompt = f"Реши задачу или ответь на вопрос:\n\n{user_text}"
@@ -525,7 +621,7 @@ async def handle_photo(message: types.Message):
                             reply_markup=main_kb)
         user_state[user_id] = None
         return
-    if state == "awaiting_conспект":
+    if state == "awaiting_conspект":
         prompt = f"Составь краткий конспект:\n\n{ocr_text}"
     else:
         prompt = f"Реши задачу или ответь на вопрос:\n\n{ocr_text}"
@@ -547,7 +643,7 @@ async def handle_photo(message: types.Message):
 async def handle_document(message: types.Message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
-    if state not in ["awaiting_text", "awaiting_conспект"]:
+    if state not in ["awaiting_text", "awaiting_conspект"]:
         await message.reply("📎 Для обработки файлов выбери 'Решить текст' или 'Конспект'.")
         return
     update_user_stats(user_id, "document")
@@ -584,7 +680,7 @@ async def handle_document(message: types.Message):
         await message.reply("🤖 Не удалось извлечь текст. Если PDF сканированный, отправь как фото.")
         user_state[user_id] = None
         return
-    if state == "awaiting_conспект":
+    if state == "awaiting_conspект":
         prompt = f"Составь краткий конспект:\n\n{extracted_text}"
     else:
         prompt = f"Реши задачу или ответь на вопрос:\n\n{extracted_text}"
@@ -604,6 +700,7 @@ async def handle_document(message: types.Message):
 
 async def main():
     logger.info("Bot is starting...")
+    load_data()  # Load data from SQLite at startup
     while True:
         try:
             await dp.start_polling(bot, drop_pending_updates=True)
@@ -616,4 +713,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Shutting down")
-
+        conn.close()  # Close DB connection on shutdown
