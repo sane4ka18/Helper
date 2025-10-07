@@ -5,20 +5,17 @@ import logging
 import asyncio
 from typing import Dict, List, Tuple, Set
 from datetime import datetime, date
-
 import httpx
 from dotenv import load_dotenv
-
 import base64
 import pdfplumber
 import sqlite3
-
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.filters import Command
-from openai import OpenAI
+from openai import OpenAI, AuthenticationError, RateLimitError
 
 load_dotenv()
 
@@ -42,7 +39,7 @@ dp = Dispatcher()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# SQLite connection (use a persistent path on Railway, e.g., via volume mount like '/data/bot.db')
+# SQLite connection
 DB_PATH = '/data/bot.db'  # Ensure Railway has a volume mounted at /data
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 c = conn.cursor()
@@ -78,7 +75,6 @@ premium_users: Set[int] = set()
 MEMORY_LIMIT = 10
 DEFAULT_REQUEST_LIMIT = 50
 PREMIUM_REQUEST_LIMIT = 200
-
 admin_broadcast_state: Dict[int, str] = {}
 
 main_kb = InlineKeyboardMarkup(
@@ -232,7 +228,7 @@ def update_request_count(user_id: int):
         c.execute("INSERT OR REPLACE INTO user_requests (user_id, date, count) VALUES (?, ?, 0)", (user_id, today))
         conn.commit()
     user_requests[user_id]["count"] += 1
-    c.execute("UPDATE user_requests SET count=? WHERE user_id=? AND date=?", 
+    c.execute("UPDATE user_requests SET count=? WHERE user_id=? AND date=?",
               (user_requests[user_id]["count"], user_id, today))
     conn.commit()
 
@@ -246,43 +242,55 @@ def get_requests_left(user_id: int):
     limit = get_request_limit(user_id)
     return limit - count if limit != float('inf') else float('inf')
 
-async def ocr_image_from_bytes(img_bytes: bytes):
-    try:
-        base64_image = base64.b64encode(img_bytes).decode('utf-8')
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, lambda: client.chat.completions.create(
-            model="openai/gpt-4o-mini",
-            extra_headers={
-                "HTTP-Referer": "https://your-site-url.com",
-                "X-Title": "Homework Helper Bot"
-            },
-            extra_body={},
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Extract all text from this image accurately, including any math formulas. Return only the extracted text."},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
+async def ocr_image_from_bytes(img_bytes: bytes, retries=2):
+    for attempt in range(retries + 1):
+        try:
+            base64_image = base64.b64encode(img_bytes).decode('utf-8')
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, lambda: client.chat.completions.create(
+                model="openai/gpt-4o-mini",
+                extra_headers={
+                    "HTTP-Referer": "https://your-site-url.com",
+                    "X-Title": "Homework Helper Bot"
+                },
+                extra_body={},
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Extract all text from this image accurately, including any math formulas. Return only the extracted text."},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                }
                             }
-                        }
-                    ]
-                }
-            ],
-            max_tokens=1000
-        ))
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logger.error(f"OCR error: {e}")
-        return ""
+                        ]
+                    }
+                ],
+                max_tokens=1000
+            ))
+            return response.choices[0].message.content.strip()
+        except AuthenticationError as e:
+            logger.error(f"Authentication error in OCR: {e}")
+            return f"Ошибка аутентификации: Проверьте API-ключ OpenRouter."
+        except RateLimitError as e:
+            if attempt < retries:
+                logger.warning(f"Rate limit hit, retrying {attempt + 1}/{retries}...")
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                continue
+            logger.error(f"OCR rate limit exceeded: {e}")
+            return "Превышен лимит запросов. Попробуйте позже."
+        except Exception as e:
+            logger.error(f"OCR error: {e}")
+            return ""
+    return ""
 
-async def call_openai_with_prompt(user_id: int, prompt: str, is_math: bool = False):
+async def call_openai_with_prompt(user_id: int, prompt: str, is_math: bool = False, retries=2):
     system_prompt = (
         "Ты эксперт по всем школьным предметам, включая математику, физику, литературу и другие. Решаешь задачи и отвечаешь на вопросы кратко и четко. "
         "Для математических задач используй простые символы: √ для корня, ^ для степени, × для умножения, ÷ для деления, () для скобок, без лишних квадратных или других скобок. "
-        "Без LaTeX и специальных тегов типа cdot rho и тд. Используй вместо этого символы которые поддержит телеграмм или пиши вместо тега слово например: Корень 6"
+        "Без LaTeX и специальных тегов типа cdot rho и тд. Используй вместо этого символы которые поддержит телеграм или пиши вместо тега слово например: Корень 6 "
         "Для литературы давай точные и лаконичные ответы, опираясь на текст произведения, без лишних деталей. "
         "Учитывай контекст предыдущих запросов и ответов, если они есть, чтобы ответить максимально релевантно. "
         "Дай только решение или ответ, минимум текста. Если в запросе есть 'объясни' или 'поясни', добавь краткое объяснение. "
@@ -290,29 +298,59 @@ async def call_openai_with_prompt(user_id: int, prompt: str, is_math: bool = Fal
         "Ответы должны быть структурированными. "
         "Не забывай, ты работаешь в телеграм чате, где надо используй жирный шрифт и т.д. не используй своих символов - ты не на сайте. И не используй **текст** для жирного шрифта - они не помогают, используй <b>текст</b>"
     )
-    try:
-        loop = asyncio.get_event_loop()
-        messages = [{"role": "system", "content": system_prompt}]
-        if user_id in user_memory:
-            for question, answer in user_memory[user_id][-3:]:
-                messages.append({"role": "user", "content": question})
-                messages.append({"role": "assistant", "content": answer})
-        messages.append({"role": "user", "content": prompt})
-        completion = await loop.run_in_executor(None, lambda: client.chat.completions.create(
-            model="deepseek/deepseek-chat-v3.1:free",
-            extra_headers={
-                "HTTP-Referer": "https://your-site-url.com",
-                "X-Title": "Homework Helper Bot"
-            },
-            extra_body={},
-            messages=messages,
-            temperature=0.1,
-            max_tokens=1500
-        ))
-        return completion.choices[0].message.content
-    except Exception as e:
-        logger.error(f"OpenAI API error: {e}")
-        raise
+    messages = [{"role": "system", "content": system_prompt}]
+    if user_id in user_memory:
+        for question, answer in user_memory[user_id][-3:]:
+            messages.append({"role": "user", "content": question})
+            messages.append({"role": "assistant", "content": answer})
+    messages.append({"role": "user", "content": prompt})
+    
+    for attempt in range(retries + 1):
+        try:
+            loop = asyncio.get_event_loop()
+            completion = await loop.run_in_executor(None, lambda: client.chat.completions.create(
+                model="deepseek/deepseek-chat-v3.1:free",
+                extra_headers={
+                    "HTTP-Referer": "https://your-site-url.com",
+                    "X-Title": "Homework Helper Bot"
+                },
+                extra_body={},
+                messages=messages,
+                temperature=0.1,
+                max_tokens=1500
+            ))
+            return completion.choices[0].message.content
+        except AuthenticationError as e:
+            logger.error(f"Authentication error in API call: {e}")
+            return f"Ошибка аутентификации: Проверьте API-ключ OpenRouter."
+        except RateLimitError as e:
+            if attempt < retries:
+                logger.warning(f"Rate limit hit, retrying {attempt + 1}/{retries}...")
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                continue
+            logger.error(f"API rate limit exceeded: {e}")
+            return "Превышен лимит запросов. Попробуйте позже."
+        except Exception as e:
+            logger.error(f"OpenAI API error: {e}")
+            # Fallback to another model
+            try:
+                logger.info("Attempting fallback to gpt-3.5-turbo")
+                completion = await loop.run_in_executor(None, lambda: client.chat.completions.create(
+                    model="openai/gpt-3.5-turbo",
+                    extra_headers={
+                        "HTTP-Referer": "https://your-site-url.com",
+                        "X-Title": "Homework Helper Bot"
+                    },
+                    extra_body={},
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=1500
+                ))
+                return completion.choices[0].message.content
+            except Exception as e2:
+                logger.error(f"Fallback API error: {e2}")
+                return f"Ошибка API: {e2}"
+    return "Не удалось обработать запрос. Попробуйте позже."
 
 def get_user_stats_text():
     total_users = len(user_stats)
@@ -429,7 +467,7 @@ async def callbacks_handler(callback: types.CallbackQuery):
         user_state[user_id] = "awaiting_photo"
         await callback.message.reply("📸 Отлично — отправь фото задания. Нажми ❌ Отмена, чтобы выйти.",
                                     reply_markup=cancel_kb)
-    elif data == "btn_conspект":  # Fixed typo
+    elif data == "btn_conspект":
         if get_requests_left(user_id) <= 0 and user_id not in ADMIN_IDS:
             await callback.message.reply(f"⚠️ Лимит запросов ({get_request_limit(user_id)} в день) исчерпан.", reply_markup=main_kb)
             return
@@ -462,12 +500,11 @@ async def callbacks_handler(callback: types.CallbackQuery):
         await callback.message.edit_text(text, reply_markup=profile_kb)
     elif data == "btn_back_main":
         user_state[user_id] = None
-        # Check if message content needs updating to avoid "message is not modified" error
         try:
             await callback.message.edit_text("👋 <b>Главное меню</b>", reply_markup=main_kb)
         except Exception as e:
-            if "message is not modified" in str(e):
-                pass  # Ignore if message content is the same
+            if "message is not modified" in str(e).lower():
+                pass
             else:
                 logger.error(f"Error editing message: {e}")
     elif data == "btn_cancel":
@@ -550,7 +587,6 @@ async def admin_callbacks_handler(callback: types.CallbackQuery):
         )
     elif data == "admin_backup":
         try:
-            # Ensure DB changes are committed before sending
             conn.commit()
             await bot.send_document(user_id, FSInputFile(DB_PATH), caption="Бэкап базы данных bot.db")
         except Exception as e:
@@ -651,14 +687,16 @@ async def handle_text(message: types.Message):
         answer = await call_openai_with_prompt(user_id, prompt, is_math=False)
         if user_id not in ADMIN_IDS:
             update_request_count(user_id)
+        if answer.startswith("Ошибка"):
+            await message.reply(answer, reply_markup=main_kb)
+        else:
+            save_memory(user_id, user_text, answer)
+            await message.reply(answer, reply_markup=main_kb)
     except Exception as err:
         logger.exception("OpenAI error")
         await message.reply(f"⚠️ Ошибка OpenAI API: {err}")
+    finally:
         user_state[user_id] = None
-        return
-    save_memory(user_id, user_text, answer)
-    user_state[user_id] = None
-    await message.reply(answer, reply_markup=main_kb)
 
 @dp.message(F.content_type == types.ContentType.PHOTO)
 async def handle_photo(message: types.Message):
@@ -682,6 +720,10 @@ async def handle_photo(message: types.Message):
         return
     try:
         ocr_text = await ocr_image_from_bytes(img_bytes)
+        if ocr_text.startswith("Ошибка"):
+            await message.reply(ocr_text, reply_markup=main_kb)
+            user_state[user_id] = None
+            return
     except Exception:
         logger.exception("OCR failed")
         ocr_text = ""
@@ -699,14 +741,16 @@ async def handle_photo(message: types.Message):
         answer = await call_openai_with_prompt(user_id, prompt, is_math=False)
         if user_id not in ADMIN_IDS:
             update_request_count(user_id)
+        if answer.startswith("Ошибка"):
+            await message.reply(answer, reply_markup=main_kb)
+        else:
+            save_memory(user_id, ocr_text, answer)
+            await message.reply(answer, reply_markup=main_kb)
     except Exception as err:
         logger.exception("OpenAI error on photo")
         await message.reply(f"⚠️ Ошибка OpenAI API: {err}")
+    finally:
         user_state[user_id] = None
-        return
-    save_memory(user_id, ocr_text, answer)
-    user_state[user_id] = None
-    await message.reply(answer, reply_markup=main_kb)
 
 @dp.message(F.content_type == types.ContentType.DOCUMENT)
 async def handle_document(message: types.Message):
@@ -758,14 +802,16 @@ async def handle_document(message: types.Message):
         answer = await call_openai_with_prompt(user_id, prompt, is_math=False)
         if user_id not in ADMIN_IDS:
             update_request_count(user_id)
+        if answer.startswith("Ошибка"):
+            await message.reply(answer, reply_markup=main_kb)
+        else:
+            save_memory(user_id, extracted_text, answer)
+            await message.reply(answer, reply_markup=main_kb)
     except Exception as err:
         logger.exception("OpenAI error on document")
-        await message.reply(f"⚠️ Ошибка запроса. Попробуйте позже")
+        await message.reply(f"⚠️ Ошибка запроса: {err}")
+    finally:
         user_state[user_id] = None
-        return
-    save_memory(user_id, extracted_text, answer)
-    user_state[user_id] = None
-    await message.reply(answer, reply_markup=main_kb)
 
 async def main():
     logger.info("Bot is starting...")
@@ -783,8 +829,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Shutting down")
         conn.close()
-
-
-
-
-
