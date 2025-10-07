@@ -299,7 +299,7 @@ async def call_openai_with_prompt(user_id: int, prompt: str, is_math: bool = Fal
                 messages.append({"role": "assistant", "content": answer})
         messages.append({"role": "user", "content": prompt})
         completion = await loop.run_in_executor(None, lambda: client.chat.completions.create(
-            model="deepseek/deepseek-v3.2-exp",
+            model="deepseek/deepseek-chat-v3.1:free",
             extra_headers={
                 "HTTP-Referer": "https://your-site-url.com",
                 "X-Title": "Homework Helper Bot"
@@ -783,6 +783,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Shutting down")
         conn.close()
+
 
 
 
