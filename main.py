@@ -20,7 +20,7 @@ from openai import OpenAI, AuthenticationError, RateLimitError
 load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENROUTER_API_KEY = "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"
+OPENROUTER_API_KEY = "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"
 ADMIN_IDS = {1647999523}
 DONATION_ALERTS_LINK = os.getenv("DONATION_ALERTS_LINK", "https://www.donationalerts.com/r/your_username")
 
